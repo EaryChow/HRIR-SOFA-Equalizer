@@ -21,6 +21,7 @@ class AppController:
         self.export_formats = []
         self.reference_file = None
         self.csv_selections = []
+        self.ref_align_freq = 500.0
         self.setup_frames()
         self.show_frame("FileSelect")
 
@@ -192,6 +193,28 @@ class ReferenceSelectFrame(BaseFrame):
         self.tree.column('fullpath', width=0, stretch=tk.NO)
         self.tree.pack(expand=True, fill=tk.BOTH, padx=20)
 
+        # Frequency alignment input
+        input_frame = ttk.Frame(self)
+        input_frame.pack(pady=10)
+
+        ttk.Label(input_frame, text="Alignment Frequency (Hz):").pack(side=tk.LEFT, padx=(0, 10))
+        self.freq_entry = ttk.Entry(input_frame, width=10)
+        self.freq_entry.pack(side=tk.LEFT)
+        self.freq_entry.insert(0, "500")  # Default value
+
+        # Validate numeric input
+        def validate_num(new_val):
+            return new_val == "" or new_val.replace('.', '', 1).isdigit()
+
+        vcmd = (self.register(validate_num), '%P')
+        self.freq_entry.config(validate="key", validatecommand=vcmd)
+
+        ttk.Label(input_frame,
+                  text="Frequency where the reference overlaps the binaural average."
+                       "\nDone by shifting the reference curve up or down"
+                       "\nDefault is 500 Hz.").pack(
+            side=tk.LEFT, padx=(10, 0))
+
         self.next_btn = ttk.Button(self, text="Next", command=self.next_step)
         self.next_btn.pack(pady=10)
         ttk.Button(self, text="Back",
@@ -232,6 +255,13 @@ class ReferenceSelectFrame(BaseFrame):
 
     def next_step(self):
         """Navigate to next appropriate frame"""
+        # Get alignment frequency
+        freq_input = self.freq_entry.get()
+        try:
+            self.controller.ref_align_freq = float(freq_input)
+        except ValueError:
+            self.controller.ref_align_freq = 500.0  # Default to 500 if invalid
+
         if "csv" in self.controller.export_formats:
             self.controller.show_frame("CSVOptions")
         else:
@@ -303,7 +333,7 @@ def process_data(controller):
     # Process PNG export
     if "png" in controller.export_formats:
         png_path = output_dir / f"{controller.selected_sofa.stem}.png"
-        plot_response(sofa, irs, fs, png_path, controller.reference_file)
+        plot_response(sofa, irs, fs, png_path, controller.reference_file, controller.ref_align_freq)
 
     # Process CSV export
     if "csv" in controller.export_formats:
@@ -346,7 +376,7 @@ def safe_read_sofa(file_path):
         return sofa
 
 
-def plot_response(sofa, irs, fs, output_filename, reference_file=None):
+def plot_response(sofa, irs, fs, output_filename, reference_file=None, ref_align_freq=500):
     """Plotting function with reference curve support"""
     freq, responses = calculate_responses(irs, fs)
 
@@ -390,9 +420,9 @@ def plot_response(sofa, irs, fs, output_filename, reference_file=None):
             if len(ref_freq) > 0:
                 try:
                     avg_response = filtered_responses[2] if len(filtered_responses) >= 3 else filtered_responses[0]
-                    avg_500_idx = np.abs(filtered_freq - 500).argmin()
-                    ref_500_idx = np.abs(ref_freq - 500).argmin()
-                    alignment_offset = avg_response[avg_500_idx] - ref_spl[ref_500_idx]
+                    avg_align_idx = np.abs(filtered_freq - ref_align_freq).argmin()
+                    ref_align_idx = np.abs(ref_freq - ref_align_freq).argmin()
+                    alignment_offset = avg_response[avg_align_idx] - ref_spl[ref_align_idx]
                     ref_normalized = ref_spl + alignment_offset
 
                     ref_color = linear_to_srgb((0.0, 0.2, 0.4))
